@@ -1,6 +1,7 @@
 import json
 import os
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from datetime import datetime
 import pandas as pd
 
@@ -9,9 +10,12 @@ import pandas as pd
 ########################
 DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
-def list_names(json_data) -> None:
+def list_names(json_data: str) -> list:
+    names_list = []
     for i in range(len(json_data['routes'])):
-        print(json_data['routes'][i]['name'])
+        names_list.append(json_data['routes'][i]['name'])
+
+    return names_list
 
 def recognize_avenue(json_data, name: str) -> dict:
     for i in range(len(json_data['routes'])):
@@ -53,6 +57,10 @@ def extract_delays(folder_path: str, name: str) -> dict:
     results = {} #TODO: Hay casos en que no hay datos ¡CUIDADO!
 
     for json_file in json_list:
+        json_name = os.path.basename(json_file)
+        if "(" in json_name:
+            # print(json_name) # TODO: Colocarlo en un logger.
+            continue
         with open(json_file) as f:
             data = json.load(f)
             for i in range(len(data['routes'])):
@@ -68,11 +76,11 @@ def extract_delays(folder_path: str, name: str) -> dict:
                             int(data['routes'][i]['length']) / int(data['routes'][i]['historicTime'])
                         ),2)*3.6
                     }
-                    results[json_file[:-5]] = dict_result
+                    results[json_name[:-5]] = dict_result
 
     return results
 
-def draw_graph(results: dict, variable: str, day: str, step: int = 10, smoothing_window: int = 5) -> None:
+def draw_graph(results: dict, variable: str, day: str, selected_corridor: str, step_minutes: int = 30, smoothing_window: int = 5) -> None:
     if variable == "travel_time":
         title = "tiempo de viaje"
         units = "s"
@@ -81,10 +89,10 @@ def draw_graph(results: dict, variable: str, day: str, step: int = 10, smoothing
         units = "km/h"
 
     X = list(results.keys())
-    X = [f"{elem[-6:-4]}:{elem[-4:-2]}:{elem[-2:]}" for elem in X]
+    X = [datetime.strptime(elem, "%H%M%S") for elem in X]
+
     Y1 = []
     Y2 = []
-
     for dict_result in results.values():
         Y1.append(dict_result[variable])
         Y2.append(dict_result[f"mean_{variable}"])
@@ -92,14 +100,25 @@ def draw_graph(results: dict, variable: str, day: str, step: int = 10, smoothing
     Y1_smooth = pd.Series(Y1).rolling(window=smoothing_window, center=True).mean()
     # Y2_smooth = pd.Series(Y2).rolling(window=smoothing_window, center=True).mean()
 
-    plt.plot(X, Y1_smooth, label=f"{title.upper()} REAL")
-    plt.plot(X, Y2, label=f"{title.upper()} PROMEDIO")
-    plt.xlabel('HORA')
-    plt.ylabel(f"{title.upper()} ({units.upper()})")
-    plt.title(f"GRÁFICA DE {title.upper()}\n{day.upper()}")
-    plt.legend()
-    plt.grid(True)
-    plt.xticks(ticks=X[::step], rotation=90)
+    fig, ax = plt.subplots()
+
+    ax.plot(X, Y1_smooth, label=f"{title.upper()} REAL")
+    ax.plot(X, Y2, label=f"{title.upper()} PROMEDIO")
+    ax.set_xlabel('HORA')
+    ax.set_ylabel(f"{title.upper()} ({units.upper()})")
+    ax.set_title(f"GRÁFICA DE {title.upper()}\n{day.upper()}\n{selected_corridor.upper()}")
+    ax.legend()
+    ax.grid(True)
+
+    # Formatear bien el eje X con horas
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=step_minutes))
+
+
+    # Opcionalmente limitar un rango de horas
+    ax.set_xlim([datetime.strptime("06:35:00", "%H:%M:%S"), datetime.strptime("21:00:00", "%H:%M:%S")])
+
+    fig.autofmt_xdate()  # Para rotar las fechas automáticamente
     plt.tight_layout()
     plt.show()
 
@@ -112,21 +131,8 @@ def list_days(folder_path: str):
     print(days_list)
 
 def show_names(folder_path: str, day: str):
-    formated_date = date.replace('-','')
+    formated_date = day.replace('/','')
     day_folder = os.path.join(folder_path, formated_date)
 
     last_json_path = [os.path.join(day_folder, file) for file in os.listdir(day_folder)][-1]
     list_names(last_json_path)
-
-if __name__ == '__main__':
-    # with open('test/23042025/064000.json') as f:
-        # data = json.load(f)
-        # selected_avenue = recognize_avenue(data, "Defensores del Morro")
-        # dict_summary = extract_information(selected_avenue)
-        # list_names(data)
-
-    results = extract_delays("test/23042025", "CCGT: Av. Mariano Cornejo EO")
-    day = "23/04/2025"
-    date = datetime.strptime(day, "%d/%m/%Y")
-    date_name = DIAS_SEMANA[date.weekday()]
-    draw_graph(results, "travel_time", day = f"{date_name + ' ' + day}")
